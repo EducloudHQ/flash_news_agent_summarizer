@@ -1,0 +1,30 @@
+default_agent: flash_news_strands_agent
+agents:
+  flash_news_strands_agent:
+    name: flash_news_strands_agent
+    entrypoint: /Users/rosius/Documents/flash_news_stream_summarizer/strands/flash_news_agent.py
+    platform: linux/arm64
+    container_runtime: none
+    aws:
+      execution_role: arn:aws:iam::132260253285:role/agentcore-flash_news_strands_agent-role
+      execution_role_auto_create: false
+      account: '132260253285'
+      region: us-east-1
+      ecr_repository: 132260253285.dkr.ecr.us-east-1.amazonaws.com/bedrock-agentcore-flash_news_strands_agent
+      ecr_auto_create: false
+      network_configuration:
+        network_mode: PUBLIC
+      protocol_configuration:
+        server_protocol: HTTP
+      observability:
+        enabled: true
+    bedrock_agentcore:
+      agent_id: flash_news_strands_agent-77mL4dBtst
+      agent_arn: arn:aws:bedrock-agentcore:us-east-1:132260253285:runtime/flash_news_strands_agent-77mL4dBtst
+      agent_session_id: null
+    codebuild:
+      project_name: bedrock-agentcore-flash_news_strands_agent-builder
+      execution_role: arn:aws:iam::132260253285:role/AmazonBedrockAgentCoreSDKCodeBuild-us-east-1-c830d562de
+      source_bucket: bedrock-agentcore-codebuild-sources-132260253285-us-east-1
+    authorizer_configuration: null
+    oauth_configuration: null

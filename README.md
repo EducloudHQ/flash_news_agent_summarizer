@@ -1,58 +1,32 @@
+![flash_news_agent_architecture](assets/flash_news_agent.png)
+# Mastering AWS AgentCore 
+Amazon Bedrock AgentCore enables you to deploy and operate highly effective agents securely, at scale using any framework and model. With Amazon Bedrock AgentCore, developers can accelerate AI agents into production with the scale, reliability, and security, critical to real-world deployment. AgentCore provides tools and capabilities to make agents more effective and capable, purpose-built infrastructure to securely scale agents, and controls to operate trustworthy agents. Amazon Bedrock AgentCore services are composable and work with popular open-source frameworks and any model, so you don’t have to choose between open-source flexibility and enterprise-grade security and reliability
 
-# Welcome to your CDK Python project!
+## This project focuses on AgentCore Runtime(serverless, low-latency execution))
+Flash-News Stream Summarizer is an agent invoked by an Amazon Kinesis stream that ingests >1 k msg/s, clusters breaking headlines, and pushes 200-character digests to SNS mobile topics in < 2 seconds.
 
-This is a blank project for CDK development with Python.
+### Why this feature matters
+Runtime is the bedrock (pun intended) that lets an AI agent autoscale exactly like Lambda, but with longer-lived sessions for planning loops.
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+### What students practice (hands-on)
 
-This project is set up like a standard Python project.  The initialization
-process also creates a virtualenv within this project, stored under the `.venv`
-directory.  To create the virtualenv it assumes that there is a `python3`
-(or `python` for Windows) executable in your path with access to the `venv`
-package. If for any reason the automatic creation of the virtualenv fails,
-you can create the virtualenv manually.
+- Configure AgentCore Runtime for burst concurrency.
+- Tune cold-start budgets and latency budgets.
+- Stress-test with Kinesis Data Generator.
 
-To manually create a virtualenv on MacOS and Linux:
+### What we're 
 
+
+### Locally test agent
+
+Run the following command in the cli
+```bash
+ jq -r '.articles[].title | @json' sample_news.json | \
+while read -r TITLE_JSON; do
+  echo "Testing: $TITLE_JSON"
+
+  curl -s -X POST http://localhost:8080/invocations \
+       -H "Content-Type: application/json" \
+       -d "{\"headline\": ${TITLE_JSON}}"
+done
 ```
-$ python3 -m venv .venv
-```
-
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
-
-```
-$ source .venv/bin/activate
-```
-
-If you are a Windows platform, you would activate the virtualenv like this:
-
-```
-% .venv\Scripts\activate.bat
-```
-
-Once the virtualenv is activated, you can install the required dependencies.
-
-```
-$ pip install -r requirements.txt
-```
-
-At this point you can now synthesize the CloudFormation template for this code.
-
-```
-$ cdk synth
-```
-
-To add additional dependencies, for example other CDK libraries, just add
-them to your `setup.py` file and rerun the `pip install -r requirements.txt`
-command.
-
-## Useful commands
-
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
-
-Enjoy!
