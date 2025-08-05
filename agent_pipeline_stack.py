@@ -142,6 +142,15 @@ class AgentPipelineStack(Stack):
             role_policy_statements=[
                 # Needed for toolkit build & push to ECR
                 iam.PolicyStatement(actions=["ecr:GetAuthorizationToken"], resources=["*"]),
+                iam.PolicyStatement(
+                    actions=[
+                        "iam:GetRole",
+                        "iam:GetRolePolicy",
+                        "iam:ListRolePolicies",
+                        "iam:ListAttachedRolePolicies",
+                    ],
+                    resources=[agent_role.role_arn],  # scope to the specific role created above
+                ),
 
                 # PULL + PUSH repo-scoped (toolkit/dockerd push)
                 iam.PolicyStatement(
