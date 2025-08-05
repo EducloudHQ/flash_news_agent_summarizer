@@ -190,8 +190,7 @@ class AgentPipelineStack(Stack):
             build_environment=codebuild.BuildEnvironment(privileged=True),  # docker-in-docker
         )
 
-        pipeline.add_stage(PipelineAppStage(self,"PipelineStage", env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'),
-                                                   region=os.getenv('CDK_DEFAULT_REGION')),), pre=[deploy_agent_step],
+        pipeline.add_stage(PipelineAppStage(self,"PipelineStage", env=cdk.Environment(account=self.account, region=self.region),), pre=[deploy_agent_step],
 
                            ).add_post(ManualApprovalStep('approval'))
 
