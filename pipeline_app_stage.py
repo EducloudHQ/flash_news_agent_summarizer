@@ -6,6 +6,4 @@ from flash_news_stream_summarizer.flash_news_stream_summarizer_stack import Flas
 class PipelineAppStage(cdk.Stage):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
-        flash_news_stream_summarizer = FlashNewsStreamSummarizerStack(self, "FlashNewsStreamSummarizerStack"
-
-                                                                      )
+        FlashNewsStreamSummarizerStack(self, "FlashNewsStreamSummarizerStack" )

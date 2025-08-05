@@ -14,8 +14,6 @@ from constructs import Construct
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
 
 
-
-
 class FlashNewsStreamSummarizerStack(Stack):
     def __init__(
             self,
