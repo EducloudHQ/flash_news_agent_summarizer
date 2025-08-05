@@ -172,7 +172,7 @@ class AgentPipelineStack(Stack):
         # 🔹 ❺ Put the agent build in its own wave so it always runs
         agent_wave = pipeline.add_wave("AgentImage")
         agent_wave.add_pre(deploy_agent_step)
-        repo.grant_pull_push(deploy_agent_step.role)
+
 
         # 🔹 ❻ Then deploy your application stage
         pipeline.add_stage(
