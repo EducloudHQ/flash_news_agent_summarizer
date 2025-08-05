@@ -151,6 +151,19 @@ class AgentPipelineStack(Stack):
                 '  --region "$AWS_DEFAULT_REGION"'
             ],
             role_policy_statements=[
+                iam.PolicyStatement(
+                    actions=[
+                        "bedrock-agentcore:CreateWorkloadIdentity",
+                        "bedrock-agentcore:UpdateWorkloadIdentity",
+                        "bedrock-agentcore:DeleteWorkloadIdentity",
+                        "bedrock-agentcore:GetWorkloadIdentity",
+                        "bedrock-agentcore:ListWorkloadIdentities",
+                        "bedrock-agentcore:TagResource",
+                        "bedrock-agentcore:UntagResource",
+                    ],
+                    # Start broad to unblock; tighten after it works
+                    resources=["*"],
+                ),
                 # Needed for toolkit build & push to ECR
                 iam.PolicyStatement(actions=["ecr:GetAuthorizationToken"], resources=["*"]),
                 iam.PolicyStatement(
