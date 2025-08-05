@@ -8,6 +8,7 @@ from aws_cdk.pipelines import (
     ManualApprovalStep, CodePipelineSource, CodeBuildOptions,
     CodePipeline, ShellStep, CodeBuildStep
 )
+from aws_cdk import aws_ecr as ecr
 from constructs import Construct
 from pipeline_app_stage import PipelineAppStage
 
@@ -43,6 +44,11 @@ class AgentPipelineStack(Stack):
                 ],
             ),
             code_build_defaults=codebuild_defaults,
+        )
+        repo = ecr.Repository(
+            self, "FlashNewsRepo",
+            repository_name="flash-news-strands",
+            image_scan_on_push=True,
         )
 
         # Agent execution role (unchanged)
@@ -115,33 +121,22 @@ class AgentPipelineStack(Stack):
                 "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",  # from the CDK ECR repo definition
             },
             commands=[
-                # POSIX-safe strict mode
                 "set -eu",
-
-                # Sanity checks
                 'echo "PWD=$(pwd)"; ls -la',
-                '[ -n "$IMG_CONTEXT" ] || { echo "❌ IMG_CONTEXT not set"; exit 1; }',
-                '[ -n "$IMG_DOCKERFILE" ] || { echo "❌ IMG_DOCKERFILE not set"; exit 1; }',
                 'echo "Listing $IMG_CONTEXT:"; ls -la "$IMG_CONTEXT" || true',
-
-                # Ensure Docker client uses a valid context (not the old 'strands' one)
-                'docker context ls || true',
                 'docker context use default || true',
 
                 # Login to ECR registry (host only)
                 'ECR_REGISTRY="$(echo "$REPO_URI" | cut -d"/" -f1)"',
                 'aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"',
 
-                # Buildx for ARM64
+                # Buildx and push
                 'docker buildx create --use --name agentcore_builder || docker buildx use agentcore_builder',
-                'test -f "$IMG_DOCKERFILE" || { echo "❌ Missing $IMG_DOCKERFILE"; exit 1; }',
-
-                # Build & push
                 'docker buildx build --platform linux/arm64 '
                 '  -f "$IMG_DOCKERFILE" -t "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
                 '  --push "$IMG_CONTEXT"',
 
-                # Upsert runtime + store ARN in SSM
+                # Upsert AgentCore runtime
                 'python strands/upsert_runtime.py '
                 '  --image "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
                 '  --agent-name flash_news_strands_agent '
@@ -150,16 +145,10 @@ class AgentPipelineStack(Stack):
             role_policy_statements=[
                 iam.PolicyStatement(
                     actions=[
-                        "ecr:GetAuthorizationToken",
-                        "ecr:DescribeRepositories",
-                        "ecr:CreateRepository",
-                        "ecr:InitiateLayerUpload",
-                        "ecr:UploadLayerPart",
-                        "ecr:CompleteLayerUpload",
-                        "ecr:PutImage",
-                        "bedrock-agentcore-control:*",
-                        "iam:PassRole",
-                        "ssm:PutParameter",
+                        "ecr:GetAuthorizationToken",  # still needed (resource is "*")
+                        "bedrock-agentcore-control:*",  # for create/update runtime
+                        "iam:PassRole",  # to pass the execution role to AgentCore
+                        "ssm:PutParameter",  # write runtime ARN
                     ],
                     resources=["*"],
                 )
@@ -170,6 +159,7 @@ class AgentPipelineStack(Stack):
         # 🔹 ❺ Put the agent build in its own wave so it always runs
         agent_wave = pipeline.add_wave("AgentImage")
         agent_wave.add_pre(deploy_agent_step)
+        repo.grant_pull_push(deploy_agent_step.role)
 
         # 🔹 ❻ Then deploy your application stage
         pipeline.add_stage(
