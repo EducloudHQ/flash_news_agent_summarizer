@@ -144,14 +144,27 @@ class AgentPipelineStack(Stack):
             ],
             role_policy_statements=[
                 iam.PolicyStatement(
-                    actions=[
-                        "ecr:GetAuthorizationToken",  # still needed (resource is "*")
-                        "bedrock-agentcore-control:*",  # for create/update runtime
-                        "iam:PassRole",  # to pass the execution role to AgentCore
-                        "ssm:PutParameter",  # write runtime ARN
-                    ],
+                    actions=["ecr:GetAuthorizationToken"],
                     resources=["*"],
-                )
+                ),
+                iam.PolicyStatement(
+                    actions=[
+                        # PULL (also used during push for blob HEAD checks)
+                        "ecr:BatchCheckLayerAvailability",
+                        "ecr:GetDownloadUrlForLayer",
+                        "ecr:BatchGetImage",
+                        # PUSH
+                        "ecr:InitiateLayerUpload",
+                        "ecr:UploadLayerPart",
+                        "ecr:CompleteLayerUpload",
+                        "ecr:PutImage",
+                    ],
+                    resources=[repo.repository_arn],
+                ),
+                iam.PolicyStatement(
+                    actions=["bedrock-agentcore-control:*", "iam:PassRole", "ssm:PutParameter"],
+                    resources=["*"],
+                ),
             ],
             # build_environment omitted here because we set code_build_defaults to privileged=True
         )
