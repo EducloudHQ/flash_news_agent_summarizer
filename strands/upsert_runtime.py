@@ -52,6 +52,29 @@ def main():
     print("Configure response:")
     print(json.dumps(cfg, indent=2, default=str))
 
+    # 🔧 Scrub cached runtime/agent identifiers so we don't try to update a missing one
+    try:
+        cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                original = f.readlines()
+            filtered = []
+            for ln in original:
+                s = ln.strip()
+                if s.startswith((
+                    "endpointArn:", "endpoint_arn:",
+                    "runtimeArn:", "runtime_arn:",
+                    "runtimeId:", "agentId:", "agent_id:",
+                )):
+                    continue
+                filtered.append(ln)
+            if filtered != original:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.writelines(filtered)
+                print("🔧 Cleared cached runtime/agent identifiers in .bedrock_agentcore.yaml")
+    except Exception as e:
+        print(f"⚠️ Failed to scrub .bedrock_agentcore.yaml: {e}")
+
     # Launch
     launch_kwargs = {}
     if args.local:
@@ -92,7 +115,7 @@ def main():
         )
         print(f"✔︎ Stored runtime ARN in SSM: {runtime_arn}")
     elif not runtime_arn:
-        print("⚠︎ Could not determine runtime ARN; skip SSM write.", file=sys.stderr)
+        print("⚠️ Could not determine runtime ARN; skip SSM write.", file=sys.stderr)
 
 
 if __name__ == "__main__":
