@@ -120,7 +120,7 @@ class AgentPipelineStack(Stack):
             env={
                 "AWS_DEFAULT_REGION": self.region,
                 "AGENT_ROLE_ARN": agent_role.role_arn,
-                "AGENT_NAME": "flash_news_strands_agent",
+                "AGENT_NAME": f"flash_news_strands_agent-{ '{CODEBUILD_RESOLVED_SOURCE_VERSION}'[:7] }",
                 "WORKDIR": "strands",
                 "ENTRYPOINT": "flash_news_agent.py",
                 "REQUIREMENTS_FILE": "requirements.txt",
