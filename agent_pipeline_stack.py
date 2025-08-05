@@ -19,8 +19,9 @@ class AgentPipelineStack(Stack):
 
         # ❶ GitHub source (replace owner/repo and secret name)
         source = pipelines.CodePipelineSource.git_hub(
-            "trey-rosius/flash_news_agent_summarizer",  # owner/repo
+            "EducloudHQ/flash_news_agent_summarizer",  # owner/repo
             "pipeline",  # branch
+
 
         )
 
