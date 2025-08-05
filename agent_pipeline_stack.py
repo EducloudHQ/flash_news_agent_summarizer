@@ -13,7 +13,7 @@ from constructs import Construct
 from pipeline_app_stage import PipelineAppStage
 
 
-class AgentcorePipelineStack(Stack):
+class AgentPipelineStack(Stack):
     def __init__(self, scope: Construct, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
 
@@ -166,23 +166,24 @@ class AgentcorePipelineStack(Stack):
                 "AWS_DEFAULT_REGION": self.region,
                 "AGENT_ROLE_ARN": agent_role.role_arn  # role created elsewhere in the stack
             },
+            role_policy_statements=[
+                iam.PolicyStatement(
+                    actions=[
+                        "ecr:BatchGetImage",
+                        "ecr:GetDownloadUrlForLayer",
+                        "ecr:GetAuthorizationToken",
+                        "bedrock-agentcore-control:*",
+                        "iam:PassRole",
+                    ],
+                    resources=["*"],
+                )
+            ],
             build_environment=codebuild.BuildEnvironment(privileged=True),  # docker-in-docker
         )
 
-        pipeline.add_stage(PipelineAppStage, pre=[deploy_agent_step],
-                           env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'),
-                                               region=os.getenv('CDK_DEFAULT_REGION')),
+        pipeline.add_stage(PipelineAppStage(self,"PipelineStage", env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'),
+                                                   region=os.getenv('CDK_DEFAULT_REGION')),), pre=[deploy_agent_step],
+
                            )
 
-        # ❻ Grant the CodeBuild role whatever Bedrock/ IAM permissions deploy_agent.py needs
-        deploy_agent_step.add_to_role_policy(
-            iam.PolicyStatement(
-                actions=[
-                    "iam:*",
-                    "ecr:*",
-                    "bedrock-agentcore:*",
-                    # + any others the toolkit calls
-                ],
-                resources=["*"],
-            )
-        )
+
