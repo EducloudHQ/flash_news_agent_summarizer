@@ -1,67 +1,105 @@
 #!/usr/bin/env python3
-"""
-Upsert a Bedrock AgentCore runtime and persist its ARN in SSM.
-
-Usage:
-  python upsert_runtime.py \
-      --image 123456789012.dkr.ecr.us-east-1.amazonaws.com/flash-news:abcdef \
-      --agent-name flash_news_strands_agent \
-      --role-arn arn:aws:iam::123456789012:role/agentcore-flash_news_strands_agent-role
-"""
-
-import argparse
+import argparse, os, sys, time, json
 import boto3
-import botocore.exceptions as exc
-import sys
+from boto3.session import Session
+from bedrock_agentcore_starter_toolkit import Runtime
 
-# ────────────────────────── CLI args ──────────────────────────
-ap = argparse.ArgumentParser()
-ap.add_argument("--image",       required=True, help="ECR image URI (linux/arm64)")
-ap.add_argument("--agent-name",  required=True, help="AgentCore runtime name")
-ap.add_argument("--role-arn",    required=True, help="IAM role for the runtime")
-ap.add_argument("--ssm-param",   default="/agentcore/flash-news/runtime-arn",
-               help="SSM Parameter path that stores the runtime ARN")
-args = ap.parse_args()
+def _status_to_tuple(status_resp):
+    """Return (status, arn) from toolkit status() response."""
+    endpoint = None
+    if hasattr(status_resp, "endpoint"):
+        endpoint = status_resp.endpoint
+    elif isinstance(status_resp, dict):
+        endpoint = status_resp.get("endpoint")
+    if not isinstance(endpoint, dict):
+        return None, None
+    status = endpoint.get("status")
+    arn = endpoint.get("arn") or endpoint.get("endpointArn")
+    return status, arn
 
-# ────────────────────────── AWS clients ───────────────────────
-ctl = boto3.client("bedrock-agentcore-control")
-ssm = boto3.client("ssm")
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--image", required=True, help="ECR image URI (repo:tag or @digest) already pushed")
+    p.add_argument("--agent-name", required=True, help="AgentCore runtime name")
+    p.add_argument("--role-arn", required=True, help="Execution role ARN created by CDK")
+    p.add_argument("--region", default=os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION"))
+    p.add_argument("--workdir", default="strands", help="Dir containing flash_news_agent.py (won’t build)")
+    p.add_argument("--ssm-param", default="/agentcore/flash-news/runtime-arn")
+    p.add_argument("--entrypoint", default="flash_news_agent.py", help="Only used in rare fallback path")
+    args = p.parse_args()
 
-def put_runtime_arn(arn: str) -> None:
-    """Persist runtime ARN in SSM Parameter Store (String)."""
-    ssm.put_parameter(Name=args.ssm_param, Value=arn, Type="String", Overwrite=True)
-    print(f"✔︎ Stored runtime ARN in SSM: {arn}")
+    if args.workdir and args.workdir != ".":
+        if not os.path.isdir(args.workdir):
+            print(f"❌ workdir '{args.workdir}' not found", file=sys.stderr)
+            sys.exit(1)
+        os.chdir(args.workdir)
 
-def get_runtime_arn() -> str:
-    """Describe the runtime and return its ARN (or raise if not found)."""
-    resp = ctl.describe_agent_runtime(name=args.agent_name)
-    return resp["runtimeArn"]
+    # Region fallback
+    region = args.region or (Session().region_name or "us-east-1")
 
-# ────────────────────────── Upsert logic ──────────────────────
-try:
-    # Attempt in-place update
-    ctl.update_agent_runtime(
-        name=args.agent_name,
-        artifact={"containerConfiguration": {"containerUri": args.image}},
-        roleArn=args.role_arn,
-    )
-    arn = get_runtime_arn()
-    put_runtime_arn(arn)
-    print("✔︎ Updated existing runtime")
+    rt = Runtime()
 
-except exc.ClientError as err:
-    if err.response["Error"]["Code"] != "ResourceNotFoundException":
-        # Any error other than "runtime does not exist" → fail hard
-        print(f"✖︎ AWS error: {err}", file=sys.stderr)
-        raise
+    # --- Try to launch/update runtime using the already-pushed image ---
+    launched = False
+    try_order = [
+        # (callable, kwargs)
+        (rt.launch, {"image_uri": args.image, "execution_role": args.role_arn, "agent_name": args.agent_name, "region": region}),
+        (rt.launch, {"container_uri": args.image, "role_arn": args.role_arn, "name": args.agent_name, "region": region}),
+        (rt.launch, {"image_uri": args.image, "role_arn": args.role_arn, "name": args.agent_name, "region": region}),
+    ]
+    for fn, kw in try_order:
+        try:
+            print(f"→ Trying Runtime.launch with args: {kw}")
+            fn(**kw)  # if signature matches, we’re done
+            launched = True
+            break
+        except TypeError as e:
+            print(f"… signature didn’t match ({e}); trying next")
+        except Exception as e:
+            print(f"… launch attempt failed: {e}", file=sys.stderr)
 
-    # Runtime not found → create a new one
-    resp = ctl.create_agent_runtime(
-        name=args.agent_name,
-        artifact={"containerConfiguration": {"containerUri": args.image}},
-        protocolConfiguration={"serverProtocol": "MCP"},
-        roleArn=args.role_arn,
-    )
-    arn = resp["runtimeArn"]
-    put_runtime_arn(arn)
-    print("✔︎ Created new runtime")
+    # --- Fallback: do a minimal configure (no build) then launch() ---
+    if not launched:
+        # We *really* don’t want to rebuild; try common knobs
+        cfg_try = [
+            {"entrypoint": args.entrypoint, "execution_role": args.role_arn, "auto_create_ecr": False,
+             "region": region, "agent_name": args.agent_name, "skip_build": True},
+            {"entrypoint": args.entrypoint, "execution_role": args.role_arn, "auto_create_ecr": False,
+             "region": region, "agent_name": args.agent_name},
+        ]
+        # Some toolkit builds accept an env var telling it to reuse an existing image
+        os.environ["AGENTCORE_IMAGE_URI"] = args.image
+        configured = False
+        for kw in cfg_try:
+            try:
+                print(f"→ Fallback configure with args: {kw}")
+                rt.configure(**kw)
+                configured = True
+                break
+            except TypeError as e:
+                print(f"… configure signature didn’t match ({e}); trying next")
+        if not configured:
+            print("✖︎ Could not configure runtime without build; aborting.", file=sys.stderr)
+            sys.exit(2)
+        print("→ Launching after minimal configure")
+        rt.launch()
+
+    # --- Wait for terminal status & capture ARN ---
+    terminal = {"READY", "CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"}
+    arn = None
+    while True:
+        st, arn = _status_to_tuple(rt.status())
+        print(f"Agent status: {st or 'UNKNOWN'}")
+        if st in terminal:
+            break
+        time.sleep(10)
+
+    # --- Persist ARN to SSM so your CDK stack can read it ---
+    if arn:
+        boto3.client("ssm").put_parameter(Name=args.ssm_param, Value=arn, Type="String", Overwrite=True)
+        print(f"✔︎ Stored runtime ARN in SSM: {arn}")
+    else:
+        print("⚠︎ Could not determine runtime ARN; SSM parameter not updated", file=sys.stderr)
+
+if __name__ == "__main__":
+    main()
