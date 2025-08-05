@@ -116,9 +116,10 @@ class AgentPipelineStack(Stack):
                 "AGENT_ROLE_ARN": agent_role.role_arn,
                 # 👉 set these to where your Dockerfile & build context actually live
                 #    paths are relative to the repo root that CodePipeline checks out
-                "IMG_DOCKERFILE": "strands/Dockerfile",   # ← set these
+                "IMG_DOCKERFILE": "strands/Dockerfile",  # ← set these
                 "IMG_CONTEXT": "strands",
-                "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",  # from the CDK ECR repo definition
+                "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",
+                # from the CDK ECR repo definition
             },
             commands=[
                 "set -eu",
@@ -126,7 +127,7 @@ class AgentPipelineStack(Stack):
                 'echo "Listing $IMG_CONTEXT:"; ls -la "$IMG_CONTEXT" || true',
                 'docker context use default || true',
 
-                # Login to ECR registry (host only)
+
                 'ECR_REGISTRY="$(echo "$REPO_URI" | cut -d"/" -f1)"',
                 'aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"',
 
@@ -172,7 +173,6 @@ class AgentPipelineStack(Stack):
         # 🔹 ❺ Put the agent build in its own wave so it always runs
         agent_wave = pipeline.add_wave("AgentImage")
         agent_wave.add_pre(deploy_agent_step)
-
 
         # 🔹 ❻ Then deploy your application stage
         pipeline.add_stage(
