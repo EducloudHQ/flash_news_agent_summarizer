@@ -155,6 +155,18 @@ class AgentPipelineStack(Stack):
                     ],
                     resources=[agent_role.role_arn],  # scope to the specific role created above
                 ),
+                iam.PolicyStatement(
+                    actions=[
+                        "bedrock-agentcore:CreateAgentRuntime",
+                        "bedrock-agentcore:UpdateAgentRuntime",
+                        "bedrock-agentcore:DeleteAgentRuntime",
+                        "bedrock-agentcore:GetAgentRuntime",
+                        "bedrock-agentcore:ListAgentRuntimes",
+                        "bedrock-agentcore:TagResource",
+                        "bedrock-agentcore:UntagResource",
+                    ],
+                    resources=["*"],  # TEMP: allow all to unblock. See "Tighten scope" below.
+                ),
 
                 # PULL + PUSH repo-scoped (toolkit/dockerd push)
                 iam.PolicyStatement(
