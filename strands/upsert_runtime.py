@@ -93,7 +93,7 @@ def main():
         endpoint = None
         if hasattr(status_resp, "endpoint"):
             endpoint = status_resp.endpoint
-        elif isinstance(status_resp, dict):
+        elif isinstance(status_resp, "dict"):
             endpoint = status_resp.get("endpoint")
 
         status = endpoint.get("status") if isinstance(endpoint, dict) else None
@@ -108,7 +108,21 @@ def main():
             break
         time.sleep(10)
 
-    # Persist ARN if requested
+    # Persist ARN if requested (fallback to YAML if status didn't include it)
+    if args.ssm_param and not runtime_arn:
+        try:
+            cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
+            if os.path.exists(cfg_path):
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        s = line.strip()
+                        if s.startswith(("endpointArn:", "runtimeArn:")):
+                            runtime_arn = s.split(":", 1)[1].strip()
+                            print(f"ℹ︎ Fallback ARN from YAML: {runtime_arn}")
+                            break
+        except Exception as e:
+            print(f"⚠️ Could not read ARN from .bedrock_agentcore.yaml: {e}", file=sys.stderr)
+
     if args.ssm_param and runtime_arn:
         boto3.client("ssm").put_parameter(
             Name=args.ssm_param, Value=runtime_arn, Type="String", Overwrite=True

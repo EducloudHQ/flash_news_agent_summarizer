@@ -304,14 +304,14 @@ class AgentPipelineStack(Stack):
             ],
         )
 
-        # ❺ Put the build/upsert in its own wave (visible action)
-        agent_wave = pipeline.add_wave("AgentImage")
-        agent_wave.add_pre(deploy_agent_step)
+
 
         # ❻ Then deploy your application stage
         pipeline.add_stage(
             PipelineAppStage(
                 self, "PipelineStage",
                 env=cdk.Environment(account=self.account, region=self.region),
-            )
-        ).add_post(ManualApprovalStep("approval"))
+            ),
+            pre=[deploy_agent_step],
+            post=[ManualApprovalStep("approval")],
+        )
