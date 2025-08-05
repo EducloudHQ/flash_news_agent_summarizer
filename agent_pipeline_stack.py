@@ -167,6 +167,33 @@ class AgentPipelineStack(Stack):
                     ],
                     resources=[repo.repository_arn],
                 ),
+                # Allow reading/creating the toolkit's SDK CodeBuild role
+                iam.PolicyStatement(
+                    actions=[
+                        "iam:GetRole",
+                        "iam:CreateRole",
+                        "iam:AttachRolePolicy",
+                        "iam:PutRolePolicy",
+                        "iam:TagRole",
+                        # You already have iam:PassRole (*). If you want to scope it tightly, add it here:
+                        # "iam:PassRole",
+                    ],
+                    resources=[f"arn:aws:iam::{self.account}:role/AmazonBedrockAgentCoreSDKCodeBuild-*"],
+                ),
+                iam.PolicyStatement(
+                    actions=[
+                        "codebuild:CreateProject",
+                        "codebuild:UpdateProject",
+                        "codebuild:DeleteProject",
+                        "codebuild:StartBuild",
+                        "codebuild:BatchGetBuilds",
+                        "codebuild:BatchGetProjects",
+                        "codebuild:ListCuratedEnvironmentImages",
+                        "codebuild:BatchGetReportGroups",
+                        "codebuild:BatchGetReports",
+                    ],
+                    resources=["*"],
+                ),
 
                 # If toolkit ensures the repo, allow describe/create (these are "*" scoped in ECR)
                 iam.PolicyStatement(
