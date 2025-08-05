@@ -145,7 +145,9 @@ class AgentPipelineStack(Stack):
                 'python strands/upsert_runtime.py '
                 '  --image "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
                 '  --agent-name flash_news_strands_agent '
-                '  --role-arn "$AGENT_ROLE_ARN"',
+                '  --role-arn "$AGENT_ROLE_ARN"'
+                '  --workdir strands'
+
             ],
             role_policy_statements=[
                 iam.PolicyStatement(
