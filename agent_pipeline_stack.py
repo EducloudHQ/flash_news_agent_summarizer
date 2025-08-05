@@ -175,6 +175,12 @@ class AgentPipelineStack(Stack):
                         "ecr:GetAuthorizationToken",
                         "bedrock-agentcore-control:*",
                         "iam:PassRole",
+                        "ecr:DescribeRepositories",
+                        "ecr:CreateRepository",
+                        "ecr:InitiateLayerUpload",
+                        "ecr:UploadLayerPart",
+                        "ecr:CompleteLayerUpload",
+                        "ecr:PutImage"
                     ],
                     resources=["*"],
                 )
