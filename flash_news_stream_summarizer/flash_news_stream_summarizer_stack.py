@@ -45,7 +45,7 @@ class FlashNewsStreamSummarizerStack(Stack):
             self,
             "InvokeAgentSummarizer",
             runtime=_lambda.Runtime.PYTHON_3_12,
-            architecture=_lambda.Architecture.ARM_64,
+            architecture=_lambda.Architecture.X86_64,
             handler="main",
             entry="./lambda",
             index="invoke_agent.py",
