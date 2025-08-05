@@ -8,6 +8,7 @@ import time
 import boto3
 from boto3.session import Session
 from bedrock_agentcore_starter_toolkit import Runtime
+import botocore.exceptions as exc
 
 
 def main():
@@ -23,6 +24,9 @@ def main():
     p.add_argument("--no-auto-create-ecr", dest="auto_create_ecr", action="store_false")
     p.add_argument("--local", action="store_true", help="Run locally (dev).")
     p.add_argument("--local-build", action="store_true", help="Build here in CodeBuild then deploy.")
+    p.add_argument("--auto-update", action="store_true", default=True,
+                   help="If the agent already exists, update it instead of failing.")
+    p.add_argument("--no-auto-update", dest="auto_update", action="store_false")
     p.add_argument("--ssm-param", default=os.getenv("AGENT_ARN_PARAM", "/agentcore/flash-news/runtime-arn"),
                    help="SSM parameter to store runtime ARN (leave empty to skip).")
     args = p.parse_args()
@@ -81,9 +85,21 @@ def main():
         launch_kwargs["local"] = True
     if args.local_build:
         launch_kwargs["local_build"] = True
+    if args.auto_update:
+        # New: let the toolkit update if the agent already exists
+        launch_kwargs["auto_update_on_conflict"] = True
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
-    runtime.launch(**launch_kwargs)
+    try:
+        runtime.launch(**launch_kwargs)
+    except exc.ClientError as e:
+        # Fallback: if toolkit version doesn’t accept the kwarg or we still got a conflict, retry with update
+        msg = str(e)
+        if "ConflictException" in msg or "already exists" in msg:
+            print("ℹ︎ Conflict detected; retrying with auto-update-on-conflict...")
+            runtime.launch(auto_update_on_conflict=True, **{k: v for k, v in launch_kwargs.items() if k != "auto_update_on_conflict"})
+        else:
+            raise
 
     # Wait for terminal state
     terminal = {"READY", "CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"}
@@ -93,7 +109,7 @@ def main():
         endpoint = None
         if hasattr(status_resp, "endpoint"):
             endpoint = status_resp.endpoint
-        elif isinstance(status_resp, "dict"):
+        elif isinstance(status_resp, dict):  # fixed type check
             endpoint = status_resp.get("endpoint")
 
         status = endpoint.get("status") if isinstance(endpoint, dict) else None
