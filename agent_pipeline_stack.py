@@ -34,7 +34,7 @@ class AgentPipelineStack(Stack):
             build_environment=codebuild.BuildEnvironment(privileged=True)
         )
 
-        # ❸ Pipeline skeleton
+
         pipeline = CodePipeline(
             self,
             "BedrockAgentPipeline",
@@ -313,5 +313,5 @@ class AgentPipelineStack(Stack):
                 env=cdk.Environment(account=self.account, region=self.region),
             ),
             pre=[deploy_agent_step],
-            post=[ManualApprovalStep("approval")],
+
         )
