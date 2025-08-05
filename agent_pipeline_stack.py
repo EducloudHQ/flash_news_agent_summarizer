@@ -2,13 +2,13 @@ from aws_cdk import (
     Stack,
     aws_codebuild as codebuild,
     aws_iam as iam,
+    aws_ecr as ecr,
 )
 import aws_cdk as cdk
 from aws_cdk.pipelines import (
     ManualApprovalStep, CodePipelineSource, CodeBuildOptions,
     CodePipeline, ShellStep, CodeBuildStep
 )
-from aws_cdk import aws_ecr as ecr
 from constructs import Construct
 from pipeline_app_stage import PipelineAppStage
 
@@ -17,12 +17,12 @@ class AgentPipelineStack(Stack):
     def __init__(self, scope: Construct, id: str, **kwargs):
         super().__init__(scope, id, **kwargs)
 
-        # ❶ Source
+        # ❶ Source (GitHub)
         source = CodePipelineSource.git_hub(
             "EducloudHQ/flash_news_agent_summarizer",
             "pipeline",
-            # authentication=cdk.SecretValue.secrets_manager("GITHUB_TOKEN"),  # if using PAT
-            # or use CodePipelineSource.connection(...) with CodeStar Connections
+            # authentication=cdk.SecretValue.secrets_manager("GITHUB_TOKEN"),
+            # or use CodePipelineSource.connection(...)
         )
 
         # ❷ Global CodeBuild defaults (Docker-in-Docker)
@@ -45,13 +45,15 @@ class AgentPipelineStack(Stack):
             ),
             code_build_defaults=codebuild_defaults,
         )
+
+        # Optional: manage ECR repo in CDK (toolkit can also auto-create if needed)
         repo = ecr.Repository(
             self, "FlashNewsRepo",
             repository_name="flash-news-strands",
             image_scan_on_push=True,
         )
 
-        # Agent execution role (unchanged)
+        # Execution role for AgentCore runtime (created by CDK)
         agent_name = "flash_news_strands_agent"
         agent_role = iam.Role(
             self,
@@ -107,60 +109,49 @@ class AgentPipelineStack(Stack):
             },
         )
 
-        # ❹ Your ECR build + Runtime upsert step — now saved to a variable
+        # ❹ Build + upsert via toolkit (local build)
         deploy_agent_step = CodeBuildStep(
-            "BuildPushAndUpsert",
+            "BuildAndUpsertWithToolkit",
             input=source,
             env={
                 "AWS_DEFAULT_REGION": self.region,
                 "AGENT_ROLE_ARN": agent_role.role_arn,
-                # 👉 set these to where your Dockerfile & build context actually live
-                #    paths are relative to the repo root that CodePipeline checks out
-                "IMG_DOCKERFILE": "strands/Dockerfile",  # ← set these
-                "IMG_CONTEXT": "strands",
-                "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",
-                # from the CDK ECR repo definition
+                "AGENT_NAME": agent_name,
+                "WORKDIR": "strands",
+                "ENTRYPOINT": "flash_news_agent.py",
+                "REQUIREMENTS_FILE": "requirements.txt",
             },
             commands=[
                 "set -eu",
                 'echo "PWD=$(pwd)"; ls -la',
-                'echo "Listing $IMG_CONTEXT:"; ls -la "$IMG_CONTEXT" || true',
-                'docker context use default || true',
+                'echo "Listing $WORKDIR:"; ls -la "$WORKDIR" || true',
 
-
-                'ECR_REGISTRY="$(echo "$REPO_URI" | cut -d"/" -f1)"',
-                'aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"',
-
-                # Buildx and push
-                'docker buildx create --use --name agentcore_builder || docker buildx use agentcore_builder',
-                'docker buildx build --platform linux/arm64 '
-                '  -f "$IMG_DOCKERFILE" -t "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
-                '  --push "$IMG_CONTEXT"',
-
-                # ✅ Install the toolkit in the CodeBuild environment (not in your image)
+                # Install toolkit in the CodeBuild environment
                 'python -m pip install --upgrade pip',
-                'python -m pip install "bedrock-agentcore-starter-toolkit==0.1.3" boto3',
+                'python -m pip install "bedrock-agentcore-starter-toolkit>=0.1.3" boto3',
 
-                # Upsert AgentCore runtime
+                # Upsert using toolkit (builds here, then deploys)
                 'python strands/upsert_runtime.py '
-                '  --image "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
-                '  --agent-name flash_news_strands_agent '
-                '  --role-arn "$AGENT_ROLE_ARN"'
-                '  --workdir strands'
-
+                '  --agent-name "$AGENT_NAME" '
+                '  --role-arn "$AGENT_ROLE_ARN" '
+                '  --workdir "$WORKDIR" '
+                '  --entrypoint "$ENTRYPOINT" '
+                '  --requirements "$REQUIREMENTS_FILE" '
+                '  --region "$AWS_DEFAULT_REGION" '
+                '  --local-build',
             ],
             role_policy_statements=[
-                iam.PolicyStatement(
-                    actions=["ecr:GetAuthorizationToken"],
-                    resources=["*"],
-                ),
+                # Needed for toolkit build & push to ECR
+                iam.PolicyStatement(actions=["ecr:GetAuthorizationToken"], resources=["*"]),
+
+                # PULL + PUSH repo-scoped (toolkit/dockerd push)
                 iam.PolicyStatement(
                     actions=[
-                        # PULL (also used during push for blob HEAD checks)
+                        # pull-ish
                         "ecr:BatchCheckLayerAvailability",
                         "ecr:GetDownloadUrlForLayer",
                         "ecr:BatchGetImage",
-                        # PUSH
+                        # push
                         "ecr:InitiateLayerUpload",
                         "ecr:UploadLayerPart",
                         "ecr:CompleteLayerUpload",
@@ -168,19 +159,26 @@ class AgentPipelineStack(Stack):
                     ],
                     resources=[repo.repository_arn],
                 ),
+
+                # If toolkit ensures the repo, allow describe/create (these are "*" scoped in ECR)
+                iam.PolicyStatement(
+                    actions=["ecr:DescribeRepositories", "ecr:CreateRepository"],
+                    resources=["*"],
+                ),
+
+                # Toolkit → AgentCore control-plane + write SSM + pass the execution role
                 iam.PolicyStatement(
                     actions=["bedrock-agentcore-control:*", "iam:PassRole", "ssm:PutParameter"],
                     resources=["*"],
                 ),
             ],
-            # build_environment omitted here because we set code_build_defaults to privileged=True
         )
 
-        # 🔹 ❺ Put the agent build in its own wave so it always runs
+        # ❺ Put the build/upsert in its own wave (visible action)
         agent_wave = pipeline.add_wave("AgentImage")
         agent_wave.add_pre(deploy_agent_step)
 
-        # 🔹 ❻ Then deploy your application stage
+        # ❻ Then deploy your application stage
         pipeline.add_stage(
             PipelineAppStage(
                 self, "PipelineStage",
