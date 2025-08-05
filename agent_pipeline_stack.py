@@ -236,6 +236,27 @@ class AgentPipelineStack(Stack):
                 ),
                 iam.PolicyStatement(
                     actions=[
+                        # Runtime
+                        "bedrock-agentcore:CreateAgentRuntime",
+                        "bedrock-agentcore:UpdateAgentRuntime",
+                        "bedrock-agentcore:DeleteAgentRuntime",
+                        "bedrock-agentcore:GetAgentRuntime",
+                        "bedrock-agentcore:ListAgentRuntimes",
+                        # Runtime **endpoint**
+                        "bedrock-agentcore:CreateAgentRuntimeEndpoint",
+                        "bedrock-agentcore:UpdateAgentRuntimeEndpoint",
+                        "bedrock-agentcore:DeleteAgentRuntimeEndpoint",
+                        "bedrock-agentcore:GetAgentRuntimeEndpoint",
+                        "bedrock-agentcore:ListAgentRuntimeEndpoints",
+                        # Tags
+                        "bedrock-agentcore:TagResource",
+                        "bedrock-agentcore:UntagResource",
+                    ],
+                   # resources=[f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:runtime/*"],
+                    resources=["*"],
+                ),
+                iam.PolicyStatement(
+                    actions=[
                         "codebuild:CreateProject",
                         "codebuild:UpdateProject",
                         "codebuild:DeleteProject",
