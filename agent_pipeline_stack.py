@@ -103,6 +103,13 @@ class AgentPipelineStack(Stack):
                             "bedrock-agentcore:GetWorkloadAccessToken",
                             "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
                             "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
+                            "bedrock-agentcore:CreateWorkloadIdentity",
+                            "bedrock-agentcore:UpdateWorkloadIdentity",
+                            "bedrock-agentcore:DeleteWorkloadIdentity",
+                            "bedrock-agentcore:GetWorkloadIdentity",
+                            "bedrock-agentcore:ListWorkloadIdentities",
+                            "bedrock-agentcore:TagResource",
+                            "bedrock-agentcore:UntagResource",
                         ],
                         resources=[
                             f"arn:aws:bedrock-agentcore:{self.region}:{self.account}:workload-identity-directory/default",
