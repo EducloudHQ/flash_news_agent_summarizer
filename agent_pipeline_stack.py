@@ -137,6 +137,10 @@ class AgentPipelineStack(Stack):
                 '  -f "$IMG_DOCKERFILE" -t "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
                 '  --push "$IMG_CONTEXT"',
 
+                # ✅ Install the toolkit in the CodeBuild environment (not in your image)
+                'python -m pip install --upgrade pip',
+                'python -m pip install "bedrock-agentcore-starter-toolkit==0.1.3" boto3',
+
                 # Upsert AgentCore runtime
                 'python strands/upsert_runtime.py '
                 '  --image "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
