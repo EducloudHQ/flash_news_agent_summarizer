@@ -49,8 +49,8 @@ class AgentPipelineStack(Stack):
         agent_name = "flash_news_strands_agent"
         agent_role = iam.Role(
             self,
-            "FlashNewsAgentRole",
-            role_name=f"agentcore-{agent_name}-role",
+            "FlashNewsSummarizerAgentRole",
+            role_name=f"flash-news-agentcore-{agent_name}-role",
             assumed_by=iam.ServicePrincipal("bedrock-agentcore.amazonaws.com"),
             inline_policies={
                 "AgentCorePolicy": iam.PolicyDocument(statements=[
