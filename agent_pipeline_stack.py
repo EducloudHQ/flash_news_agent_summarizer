@@ -105,30 +105,36 @@ class AgentPipelineStack(Stack):
         deploy_agent_step = CodeBuildStep(
             "BuildPushAndUpsert",
             input=source,
-            commands=[
-                # 1) ECR login/create
-                "export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)",
-                "export REPO_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/flash-news-strands",
-                "aws ecr describe-repositories --repository-names flash-news-strands || "
-                "aws ecr create-repository --repository-name flash-news-strands",
-                "aws ecr get-login-password | docker login --username AWS --password-stdin $REPO_URI",
-
-                # 2) Buildx push (ARM64)
-                "docker buildx create --use --name agentcore_builder || true",
-                "docker buildx build --platform linux/arm64 "
-                "  -t $REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION "
-                "  --push .",
-
-                # 3) Upsert AgentCore runtime + write SSM param
-                "python strands/upsert_runtime.py "
-                "  --image $REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION "
-                "  --agent-name flash_news_strands_agent "
-                "  --role-arn $AGENT_ROLE_ARN"
-            ],
             env={
                 "AWS_DEFAULT_REGION": self.region,
                 "AGENT_ROLE_ARN": agent_role.role_arn,
+                # 👉 set these to where your Dockerfile & build context actually live
+                #    paths are relative to the repo root that CodePipeline checks out
+                "DOCKERFILE": "strands/Dockerfile",  # e.g. "Dockerfile" if at root
+                "DOCKER_CONTEXT": "strands",  # e.g. "." if using root
+                "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",  # from the CDK ECR repo definition
             },
+            commands=[
+                "set -euo pipefail",
+                'echo "PWD=$(pwd)"; ls -la',
+                'echo "Listing $DOCKER_CONTEXT:"; ls -la "$DOCKER_CONTEXT" || true',
+
+                # ECR login
+                "aws ecr get-login-password | docker login --username AWS --password-stdin $REPO_URI",
+
+                # Buildx (ARM64)
+                "docker buildx create --use --name agentcore_builder || docker buildx use agentcore_builder",
+                'test -f "$DOCKERFILE" || { echo "❌ Missing $DOCKERFILE"; exit 1; }',
+                'docker buildx build --platform linux/arm64 '
+                '  -f "$DOCKERFILE" -t "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
+                '  --push "$DOCKER_CONTEXT"',
+
+                # Upsert AgentCore runtime & write SSM param
+                "python strands/upsert_runtime.py "
+                "  --image $REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION "
+                "  --agent-name flash_news_strands_agent "
+                "  --role-arn $AGENT_ROLE_ARN",
+            ],
             role_policy_statements=[
                 iam.PolicyStatement(
                     actions=[
