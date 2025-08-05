@@ -44,7 +44,7 @@ class FlashNewsStreamSummarizerStack(Stack):
         summarizer_fn = PythonFunction(
             self,
             "InvokeAgentSummarizer",
-            runtime=_lambda.Runtime.PYTHON_3_13,
+            runtime=_lambda.Runtime.PYTHON_3_12,
             architecture=_lambda.Architecture.ARM_64,
             handler="main",
             entry="./lambda",
