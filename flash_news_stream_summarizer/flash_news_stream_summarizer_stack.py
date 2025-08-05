@@ -8,9 +8,13 @@ from aws_cdk import (
     aws_sns as sns,
     aws_sns_subscriptions as subs,
     aws_iam as iam,
+    aws_ssm as ssm
 )
 from constructs import Construct
 from aws_cdk.aws_lambda_python_alpha import PythonFunction
+
+
+
 
 class FlashNewsStreamSummarizerStack(Stack):
     def __init__(
@@ -27,6 +31,10 @@ class FlashNewsStreamSummarizerStack(Stack):
             stream_name="flash-news-raw",
             shard_count=2,
             retention_period=Duration.hours(24),
+        )
+        agent_arn = ssm.StringParameter.value_for_string_parameter(
+            self,
+            "/agentcore/flash-news/runtime-arn"
         )
 
         #  SNS topic for downstream fan‑out
@@ -52,7 +60,7 @@ class FlashNewsStreamSummarizerStack(Stack):
             memory_size=512,
             timeout=Duration.seconds(30),
             environment={
-                "AGENT_ARN": "arn:aws:bedrock-agentcore:us-east-1:132260253285:runtime/flash_news_strands_agent-77mL4dBtst",
+                "AGENT_ARN": agent_arn,
                 "TOPIC_ARN": flash_topic.topic_arn,
             },
         )
@@ -74,7 +82,7 @@ class FlashNewsStreamSummarizerStack(Stack):
         summarizer_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["bedrock-agentcore:InvokeAgentRuntime"],
-                resources=["*"],
+                resources=[agent_arn],
             )
         )
 

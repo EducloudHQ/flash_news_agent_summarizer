@@ -8,6 +8,7 @@ from aws_cdk import (
 import os
 
 import aws_cdk as cdk
+from aws_cdk.pipelines import ManualApprovalStep
 from constructs import Construct
 
 from pipeline_app_stage import PipelineAppStage
@@ -180,7 +181,8 @@ class AgentPipelineStack(Stack):
                         "ecr:InitiateLayerUpload",
                         "ecr:UploadLayerPart",
                         "ecr:CompleteLayerUpload",
-                        "ecr:PutImage"
+                        "ecr:PutImage",
+                        "ssm:PutParameter"
                     ],
                     resources=["*"],
                 )
@@ -191,6 +193,7 @@ class AgentPipelineStack(Stack):
         pipeline.add_stage(PipelineAppStage(self,"PipelineStage", env=cdk.Environment(account=os.getenv('CDK_DEFAULT_ACCOUNT'),
                                                    region=os.getenv('CDK_DEFAULT_REGION')),), pre=[deploy_agent_step],
 
-                           )
+                           ).add_post(ManualApprovalStep('approval'))
+
 
 
