@@ -110,17 +110,23 @@ class AgentPipelineStack(Stack):
                 "AGENT_ROLE_ARN": agent_role.role_arn,
                 # 👉 set these to where your Dockerfile & build context actually live
                 #    paths are relative to the repo root that CodePipeline checks out
-                "DOCKERFILE": "strands/Dockerfile",  # e.g. "Dockerfile" if at root
-                "DOCKER_CONTEXT": "strands",  # e.g. "." if using root
+                "IMG_DOCKERFILE": "strands/Dockerfile",   # ← set these
+                "IMG_CONTEXT": "strands",
                 "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",  # from the CDK ECR repo definition
             },
             commands=[
+                # POSIX-safe strict mode
                 "set -eu",
+
+                # Sanity checks
                 'echo "PWD=$(pwd)"; ls -la',
+                '[ -n "$IMG_CONTEXT" ] || { echo "❌ IMG_CONTEXT not set"; exit 1; }',
+                '[ -n "$IMG_DOCKERFILE" ] || { echo "❌ IMG_DOCKERFILE not set"; exit 1; }',
                 'echo "Listing $IMG_CONTEXT:"; ls -la "$IMG_CONTEXT" || true',
 
-                # Make sure we don't override Docker's client context
-                "unset DOCKER_CONTEXT || true",
+                # Ensure Docker client uses a valid context (not the old 'strands' one)
+                'docker context ls || true',
+                'docker context use default || true',
 
                 # Login to ECR registry (host only)
                 'ECR_REGISTRY="$(echo "$REPO_URI" | cut -d"/" -f1)"',
