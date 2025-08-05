@@ -115,28 +115,27 @@ class AgentPipelineStack(Stack):
                 "REPO_URI": f"{self.account}.dkr.ecr.{self.region}.amazonaws.com/flash-news-strands",  # from the CDK ECR repo definition
             },
             commands=[
-
                 "set -eu",
-
                 'echo "PWD=$(pwd)"; ls -la',
-                'echo "Listing $DOCKER_CONTEXT:"; ls -la "$DOCKER_CONTEXT" || true',
+                'echo "Listing $IMG_CONTEXT:"; ls -la "$IMG_CONTEXT" || true',
 
-                # ECR login without a pipe
-                'LOGIN_PWD="$(aws ecr get-login-password)"',
-                'docker login --username AWS --password "$LOGIN_PWD" "$REPO_URI"',
+                # Make sure we don't override Docker's client context
+                "unset DOCKER_CONTEXT || true",
 
-                # Buildx (create if missing, otherwise reuse)
+                # Login to ECR registry (host only)
+                'ECR_REGISTRY="$(echo "$REPO_URI" | cut -d"/" -f1)"',
+                'aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"',
+
+                # Buildx for ARM64
                 'docker buildx create --use --name agentcore_builder || docker buildx use agentcore_builder',
+                'test -f "$IMG_DOCKERFILE" || { echo "❌ Missing $IMG_DOCKERFILE"; exit 1; }',
 
-                # Verify Dockerfile exists; fail early if not
-                'test -f "$DOCKERFILE" || { echo "❌ Missing $DOCKERFILE"; exit 1; }',
-
-                # Build & push ARM64 image
+                # Build & push
                 'docker buildx build --platform linux/arm64 '
-                '  -f "$DOCKERFILE" -t "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
-                '  --push "$DOCKER_CONTEXT"',
+                '  -f "$IMG_DOCKERFILE" -t "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
+                '  --push "$IMG_CONTEXT"',
 
-                # Upsert AgentCore runtime & write SSM param
+                # Upsert runtime + store ARN in SSM
                 'python strands/upsert_runtime.py '
                 '  --image "$REPO_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION" '
                 '  --agent-name flash_news_strands_agent '
