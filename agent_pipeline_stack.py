@@ -24,6 +24,10 @@ class AgentPipelineStack(Stack):
             # authentication=cdk.SecretValue.secrets_manager("GITHUB_TOKEN"),
             # or use CodePipelineSource.connection(...)
         )
+        # name the bucket the toolkit uses
+        bucket_name = f"bedrock-agentcore-codebuild-sources-{self.account}-{self.region}"
+        bucket_arn = f"arn:aws:s3:::{bucket_name}"
+        objects_arn = f"{bucket_arn}/*"
 
         # ❷ Global CodeBuild defaults (Docker-in-Docker)
         codebuild_defaults = CodeBuildOptions(
@@ -166,6 +170,44 @@ class AgentPipelineStack(Stack):
                         "ecr:PutImage",
                     ],
                     resources=[repo.repository_arn],
+                ),
+                # Allow creating/managing the toolkit's source bucket
+                iam.PolicyStatement(
+                    actions=[
+                        "s3:CreateBucket",
+                        "s3:ListBucket",
+                        "s3:GetBucketLocation",
+                        "s3:GetBucketPolicy",
+                        "s3:PutBucketPolicy",
+                        "s3:PutBucketOwnershipControls",
+                        "s3:PutBucketPublicAccessBlock",
+                        "s3:PutBucketEncryption",
+                        "s3:GetEncryptionConfiguration",
+                        "s3:PutLifecycleConfiguration",
+                        "s3:GetLifecycleConfiguration",
+                        "s3:GetBucketAcl",
+                        "s3:PutBucketAcl",
+                    ],
+                    resources=[bucket_arn],
+                ),
+                # Object-level ops (upload/download/multipart) for that bucket
+                iam.PolicyStatement(
+                    actions=[
+                        "s3:PutObject",
+                        "s3:GetObject",
+                        "s3:DeleteObject",
+                        "s3:AbortMultipartUpload",
+                        "s3:ListBucketMultipartUploads",
+                        "s3:ListMultipartUploadParts",
+                        "s3:CreateMultipartUpload",
+                        "s3:PutObjectAcl",
+                    ],
+                    resources=[objects_arn],
+                ),
+                # (optional) allow listing buckets if the toolkit probes for existence
+                iam.PolicyStatement(
+                    actions=["s3:ListAllMyBuckets"],
+                    resources=["*"],
                 ),
                 # Allow reading/creating the toolkit's SDK CodeBuild role
                 iam.PolicyStatement(
