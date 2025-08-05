@@ -116,7 +116,7 @@ class AgentPipelineStack(Stack):
             env={
                 "AWS_DEFAULT_REGION": self.region,
                 "AGENT_ROLE_ARN": agent_role.role_arn,
-                "AGENT_NAME": agent_name,
+                "AGENT_NAME": "flash_news_strands_agent",
                 "WORKDIR": "strands",
                 "ENTRYPOINT": "flash_news_agent.py",
                 "REQUIREMENTS_FILE": "requirements.txt",
@@ -130,15 +130,14 @@ class AgentPipelineStack(Stack):
                 'python -m pip install --upgrade pip',
                 'python -m pip install "bedrock-agentcore-starter-toolkit>=0.1.3" boto3',
 
-                # Upsert using toolkit (builds here, then deploys)
+
                 'python strands/upsert_runtime.py '
                 '  --agent-name "$AGENT_NAME" '
                 '  --role-arn "$AGENT_ROLE_ARN" '
                 '  --workdir "$WORKDIR" '
                 '  --entrypoint "$ENTRYPOINT" '
                 '  --requirements "$REQUIREMENTS_FILE" '
-                '  --region "$AWS_DEFAULT_REGION" '
-                '  --local-build',
+                '  --region "$AWS_DEFAULT_REGION"'
             ],
             role_policy_statements=[
                 # Needed for toolkit build & push to ECR
