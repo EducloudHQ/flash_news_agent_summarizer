@@ -11,7 +11,6 @@ from bedrock_agentcore_starter_toolkit import Runtime
 import botocore.exceptions as exc
 
 
-
 def main():
     p = argparse.ArgumentParser(description="Configure & launch Bedrock AgentCore runtime (toolkit-driven).")
     p.add_argument("--agent-name", required=True, help="AgentCore runtime name")
@@ -39,18 +38,13 @@ def main():
             sys.exit(1)
         os.chdir(args.workdir)
 
-    # Region resolution
+    # Resolve region
     sess = Session()
     region = args.region or (sess.region_name or "us-east-1")
 
     runtime = Runtime()
-    # Debug: inspect the Runtime object internals
-    try:
-        print("Runtime internal state:", json.dumps(runtime.__dict__, default=str, indent=2))
-    except Exception:
-        print("Runtime __dict__:", vars(runtime))
 
-    # Configure (toolkit handles Dockerfile/ECR/build config)
+    # Configure
     cfg = runtime.configure(
         entrypoint=args.entrypoint,
         execution_role=args.role_arn,
@@ -62,25 +56,23 @@ def main():
     print("Configure response:")
     print(json.dumps(cfg, indent=2, default=str))
 
-    # Scrub cached identifiers so we never try to update a missing runtime
+    # Clean cached runtime IDs
     try:
         cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
         if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
-                original = f.readlines()
-            filtered = [ln for ln in original if not ln.strip().startswith(
-                ("endpointArn:", "endpoint_arn:",
-                 "runtimeArn:", "runtime_arn:",
-                 "runtimeId:", "agentId:", "agent_id:")
+                lines = f.readlines()
+            filtered = [ln for ln in lines if not ln.strip().startswith(
+                ("endpointArn:", "runtimeArn:", "runtimeId:", "agentId:")
             )]
-            if filtered != original:
+            if filtered != lines:
                 with open(cfg_path, "w", encoding="utf-8") as f:
                     f.writelines(filtered)
                 print("🔧 Cleared cached identifiers in .bedrock_agentcore.yaml")
     except Exception as e:
-        print(f"⚠️ Failed to scrub .bedrock_agentcore.yaml: {e}", file=sys.stderr)
+        print(f"⚠️ Failed to scrub cache: {e}", file=sys.stderr)
 
-    # Launch/create or update the runtime
+    # Build and upsert
     launch_kwargs = {}
     if args.local:
         launch_kwargs["local"] = True
@@ -90,7 +82,6 @@ def main():
         launch_kwargs["auto_update_on_conflict"] = True
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
-    # Capture and print the launch response
     try:
         launch_response = runtime.launch(**launch_kwargs)
         print("Launch response:", json.dumps(launch_response, default=str, indent=2))
@@ -98,50 +89,44 @@ def main():
         msg = str(e)
         if "ConflictException" in msg or "already exists" in msg:
             print("ℹ︎ Retrying update on conflict...")
-            launch_response = runtime.launch(auto_update_on_conflict=True, **{k: v for k, v in launch_kwargs.items() if k != "auto_update_on_conflict"})
+            launch_response = runtime.launch(auto_update_on_conflict=True,
+                                            **{k: v for k, v in launch_kwargs.items()
+                                               if k != "auto_update_on_conflict"})
             print("Launch response after retry:", json.dumps(launch_response, default=str, indent=2))
         else:
             raise
-    try:
-        runtime.launch(**launch_kwargs)
-    except exc.ClientError as e:
-        msg = str(e)
-        if "ConflictException" in msg or "already exists" in msg:
-            print("ℹ︎ Retrying update on conflict...")
-            runtime.launch(auto_update_on_conflict=True, **{k: v for k, v in launch_kwargs.items() if k != "auto_update_on_conflict"})
-        else:
-            raise
 
-    # Poll for terminal state
+    # Extract agent ARN directly from launch response
+    agent_arn = launch_response.get('agent_arn')
+    if not agent_arn:
+        print("❌ Launch response did not include agent_arn", file=sys.stderr)
+        sys.exit(4)
+
+    # Poll until READY
     terminal = {"READY", "CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"}
-    runtime_arn = None
-    final_status = None
+    status = None
     while True:
         resp = runtime.status()
-        ep = getattr(resp, 'endpoint', None) or (resp.get('endpoint') if isinstance(resp, dict) else None)
-        final_status = ep.get('status') if isinstance(ep, dict) else None
-        runtime_arn = ep.get('arn') or ep.get('endpointArn') if isinstance(ep, dict) else runtime_arn
-        print(f"Agent status: {final_status}")
-        if final_status in terminal:
+        ep = getattr(resp, 'endpoint', None) or (resp.get('endpoint') if isinstance(resp, dict) else {})
+        status = ep.get('status')
+        print(f"Agent status: {status}")
+        if status in terminal:
             break
         time.sleep(10)
 
-    # Only write to SSM if we reached READY
-    if final_status != "READY":
-        print(f"❌ Agent did not reach READY (status: {final_status}); skipping SSM write", file=sys.stderr)
+    if status != "READY":
+        print(f"❌ Agent not READY (status={status}); aborting SSM write", file=sys.stderr)
         sys.exit(2)
 
-    # runtime.status() should have given us the ARN; if not, error out
-    if not runtime_arn:
-        print("❌ Could not retrieve runtime ARN from status endpoint; skipping SSM write", file=sys.stderr)
-        sys.exit(3)
-
-    # Persist to SSM
+    # Persist runtime ARN to SSM
     if args.ssm_param:
         boto3.client("ssm").put_parameter(
-            Name=args.ssm_param, Value=runtime_arn, Type="String", Overwrite=True
+            Name=args.ssm_param,
+            Value=agent_arn,
+            Type="String",
+            Overwrite=True
         )
-        print(f"✔︎ Stored runtime ARN in SSM: {runtime_arn}")
+        print(f"✔︎ Stored runtime ARN in SSM: {agent_arn}")
 
 
 if __name__ == "__main__":
