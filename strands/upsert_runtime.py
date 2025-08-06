@@ -11,6 +11,61 @@ from bedrock_agentcore_starter_toolkit import Runtime
 import botocore.exceptions as exc
 
 
+def get_runtime_arn_via_api(agent_name: str, region: str) -> str | None:
+    """Ask Bedrock AgentCore for the runtime ARN by name. Falls back to list if needed."""
+    try:
+        ac = boto3.client("bedrock-agentcore", region_name=region)
+    except Exception as e:
+        print(f"⚠️ Could not create bedrock-agentcore client: {e}", file=sys.stderr)
+        return None
+
+    # Try direct lookup
+    try:
+        resp = ac.get_agent_runtime(name=agent_name)
+        arn = resp.get("runtimeArn") or resp.get("arn")
+        if arn:
+            return arn
+    except exc.ClientError as e:
+        if e.response.get("Error", {}).get("Code") != "ResourceNotFoundException":
+            print(f"⚠️ get_agent_runtime failed: {e}", file=sys.stderr)
+
+    # Fallback: list and match by name
+    try:
+        paginator = ac.get_paginator("list_agent_runtimes")
+        for page in paginator.paginate():
+            for r in page.get("runtimes", []):
+                if r.get("name") == agent_name:
+                    return r.get("runtimeArn") or r.get("arn")
+    except Exception as e:
+        print(f"⚠️ list_agent_runtimes failed: {e}", file=sys.stderr)
+
+    return None
+
+
+def get_runtime_arn_from_yaml(cfg_path: str) -> str | None:
+    """Last-resort: parse any ARN-looking line from the toolkit YAML."""
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    s = line.strip()
+                    # Look for any AgentCore runtime ARN
+                    if "arn:aws:bedrock-agentcore:" in s and ":runtime/" in s:
+                        # split on spaces/colon and pull the ARN token
+                        parts = s.replace(",", " ").split()
+                        for p in parts:
+                            if p.startswith("arn:aws:bedrock-agentcore:") and ":runtime/" in p:
+                                return p.strip()
+                    # Also handle key:value formats
+                    if s.startswith(("endpointArn:", "runtimeArn:", "endpoint_arn:", "runtime_arn:")):
+                        val = s.split(":", 1)[1].strip()
+                        if val.startswith("arn:aws:bedrock-agentcore:"):
+                            return val
+    except Exception as e:
+        print(f"⚠️ Could not read ARN from .bedrock_agentcore.yaml: {e}", file=sys.stderr)
+    return None
+
+
 def main():
     p = argparse.ArgumentParser(description="Configure & launch Bedrock AgentCore runtime (toolkit-driven).")
     p.add_argument("--agent-name", required=True, help="AgentCore runtime name")
@@ -126,25 +181,17 @@ def main():
 
     # ✅ Only proceed if READY
     if final_status != "READY":
-        print(f"❌ Agent did not reach READY (final status: {final_status}). "
-              f"Not writing SSM and failing the step.", file=sys.stderr)
+        print(f"❌ Agent did not reach READY (final status: {final_status}). Not writing SSM.", file=sys.stderr)
         sys.exit(2)
 
-    # If READY but ARN missing, fallback to YAML to read it
+    # First choice: ask Bedrock AgentCore for the ARN by name
     if not runtime_arn:
-        try:
-            if os.path.exists(cfg_path):
-                with open(cfg_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        s = line.strip()
-                        if s.startswith(("endpointArn:", "runtimeArn:")):
-                            runtime_arn = s.split(":", 1)[1].strip()
-                            print(f"ℹ︎ Fallback ARN from YAML: {runtime_arn}")
-                            break
-        except Exception as e:
-            print(f"⚠️ Could not read ARN from .bedrock_agentcore.yaml: {e}", file=sys.stderr)
+        runtime_arn = get_runtime_arn_via_api(args.agent_name, region)
 
-    # Persist ARN to SSM only when READY and we have an ARN
+    # Last resort: parse YAML for an ARN-looking value
+    if not runtime_arn:
+        runtime_arn = get_runtime_arn_from_yaml(cfg_path)
+
     if args.ssm_param and runtime_arn:
         boto3.client("ssm").put_parameter(
             Name=args.ssm_param, Value=runtime_arn, Type="String", Overwrite=True
