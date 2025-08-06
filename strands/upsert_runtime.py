@@ -8,8 +8,6 @@ import time
 import boto3
 from boto3.session import Session
 from bedrock_agentcore_starter_toolkit import Runtime
-import yaml
-import botocore.exceptions as exc
 
 
 def main():
@@ -25,9 +23,6 @@ def main():
     p.add_argument("--no-auto-create-ecr", dest="auto_create_ecr", action="store_false")
     p.add_argument("--local", action="store_true", help="Run locally (dev).")
     p.add_argument("--local-build", action="store_true", help="Build here in CodeBuild then deploy.")
-    p.add_argument("--auto-update", action="store_true", default=True,
-                   help="If the agent already exists, update it instead of failing.")
-    p.add_argument("--no-auto-update", dest="auto_update", action="store_false")
     p.add_argument("--ssm-param", default=os.getenv("AGENT_ARN_PARAM", "/agentcore/flash-news/runtime-arn"),
                    help="SSM parameter to store runtime ARN (leave empty to skip).")
     args = p.parse_args()
@@ -39,13 +34,13 @@ def main():
             sys.exit(1)
         os.chdir(args.workdir)
 
-    # Resolve region
+    # Region resolution
     sess = Session()
     region = args.region or (sess.region_name or "us-east-1")
 
     runtime = Runtime()
 
-    # Configure
+    # Configure (toolkit handles Dockerfile/ECR/build config)
     cfg = runtime.configure(
         entrypoint=args.entrypoint,
         execution_role=args.role_arn,
@@ -57,69 +52,44 @@ def main():
     print("Configure response:")
     print(json.dumps(cfg, indent=2, default=str))
 
-    # Clean cached runtime IDs / force the name to what we pass
-    def _scrub_yaml_ids(cfg_path: str, desired_name: str) -> None:
-        """Safely load and rewrite the toolkit YAML to normalize name and drop cached IDs/ARNs."""
-        try:
-            if not os.path.exists(cfg_path):
-                return
+    # 🔧 Scrub cached runtime/agent identifiers so we don't try to update a missing one
+    try:
+        cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
+        if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                original = f.readlines()
+            filtered = []
+            for ln in original:
+                s = ln.strip()
+                if s.startswith((
+                    "endpointArn:", "endpoint_arn:",
+                    "runtimeArn:", "runtime_arn:",
+                    "runtimeId:", "agentId:", "agent_id:",
+                )):
+                    continue
+                filtered.append(ln)
+            if filtered != original:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.writelines(filtered)
+                print("🔧 Cleared cached runtime/agent identifiers in .bedrock_agentcore.yaml")
+    except Exception as e:
+        print(f"⚠️ Failed to scrub .bedrock_agentcore.yaml: {e}")
 
-            # Normalize agent name across common keys
-            for k in ("name", "agentName", "agent_name"):
-                data[k] = desired_name
-
-            # Drop cached identifiers at top-level
-            for k in (
-                "endpointArn", "endpoint_arn",
-                "runtimeArn",  "runtime_arn",
-                "runtimeId",
-                "agentId",     "agent_id",
-            ):
-                data.pop(k, None)
-
-            # If an 'endpoint' block exists, strip volatile fields
-            ep = data.get("endpoint")
-            if isinstance(ep, dict):
-                for k in ("arn", "endpointArn", "endpoint_arn", "status"):
-                    ep.pop(k, None)
-                if not ep:
-                    data.pop("endpoint", None)
-
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
-            print("🔧 Scrubbed cached identifiers and normalized name in .bedrock_agentcore.yaml")
-        except Exception as e:
-            print(f"⚠️ Failed to scrub/normalize .bedrock_agentcore.yaml: {e}", file=sys.stderr)
-
-    cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
-    _scrub_yaml_ids(cfg_path, args.agent_name)
-
-    # Build and upsert (single upsert with auto-update enabled)
+    # Launch
     launch_kwargs = {}
     if args.local:
         launch_kwargs["local"] = True
     if args.local_build:
         launch_kwargs["local_build"] = True
-    if args.auto_update:
-        launch_kwargs["auto_update_on_conflict"] = True
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
-    # Single call: toolkit handles create-or-update
-    try:
-        launch_response = runtime.launch(**launch_kwargs)
-        print("Launch response:", json.dumps(launch_response, default=str, indent=2))
-    except exc.ClientError as e:
-        # If the toolkit tries to update a stale agent-id (ResourceNotFound), scrub YAML and retry once
-        msg = str(e)
-        if "ResourceNotFoundException" in msg and "UpdateAgentRuntime" in msg:
-            print("ℹ︎ Detected stale agent-id during update; scrubbing YAML and retrying create/update once...")
-            _scrub_yaml_ids(cfg_path, args.agent_name)
-            launch_response = runtime.launch(**launch_kwargs)
-            print("Launch response (after retry):", json.dumps(launch_response, default=str, indent=2))
-        else:
-            raise
+    launch_response = runtime.launch(**launch_kwargs)
+    print("Launch response:", json.dumps(launch_response, default=str, indent=2))
+
+    # Wait for terminal state
+    terminal = {"READY", "CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"}
+
+    runtime_arn = None
 
     # Extract agent ARN directly from launch response
     agent_arn = launch_response.get('agent_arn')
@@ -130,32 +100,30 @@ def main():
     if not agent_arn:
         print("❌ Launch response did not include agent_arn", file=sys.stderr)
         sys.exit(4)
-
-    # Poll until READY
-    terminal = {"READY", "CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"}
-    status = None
     while True:
-        resp = runtime.status()
-        ep = getattr(resp, 'endpoint', None) or (resp.get('endpoint') if isinstance(resp, dict) else {})
-        status = ep.get('status')
+        status_resp = runtime.status()
+        endpoint = None
+        if hasattr(status_resp, "endpoint"):
+            endpoint = status_resp.endpoint
+        elif isinstance(status_resp, dict):
+            endpoint = status_resp.get("endpoint")
+
+        status = endpoint.get("status") if isinstance(endpoint, dict) else None
+
+
         print(f"Agent status: {status}")
         if status in terminal:
             break
         time.sleep(10)
 
-    if status != "READY":
-        print(f"❌ Agent not READY (status={status}); aborting SSM write", file=sys.stderr)
-        sys.exit(2)
-
-    # Persist runtime ARN to SSM
-    if args.ssm_param:
+    # Persist ARN if requested
+    if agent_arn:
         boto3.client("ssm").put_parameter(
-            Name=args.ssm_param,
-            Value=agent_arn,
-            Type="String",
-            Overwrite=True
+            Name=args.ssm_param, Value=agent_arn, Type="String", Overwrite=True
         )
         print(f"✔︎ Stored runtime ARN in SSM: {agent_arn}")
+    elif not agent_arn:
+        print("⚠️ Could not determine runtime ARN; skip SSM write.", file=sys.stderr)
 
 
 if __name__ == "__main__":
