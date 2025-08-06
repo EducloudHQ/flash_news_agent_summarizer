@@ -118,11 +118,31 @@ def main():
             except Exception:
                 print("Launch response (repr):", launch_response)
     except exc.ClientError as e:
-        # If the toolkit tries to update a stale agent-id (ResourceNotFound), scrub YAML and retry once
+        # If the toolkit tries to update a stale agent-id (ResourceNotFound), purge cache & retry
         msg = str(e)
         if "ResourceNotFoundException" in msg and "UpdateAgentRuntime" in msg:
             print("ℹ︎ Detected stale agent-id during update; scrubbing YAML and retrying create/update once...")
             _scrub_yaml_ids(cfg_path, args.agent_name)
+            # Hard purge: delete the YAML to force a clean create-or-update path
+            try:
+                if os.path.exists(cfg_path):
+                    os.remove(cfg_path)
+                    print("🗑️ Deleted cached .bedrock_agentcore.yaml (hard purge)")
+            except OSError as purge_err:
+                print(f"⚠️ Failed to delete {cfg_path}: {purge_err}", file=sys.stderr)
+
+            # Re-init runtime and re-configure to avoid any in-memory cache
+            runtime = Runtime()
+            cfg = runtime.configure(
+                entrypoint=args.entrypoint,
+                execution_role=args.role_arn,
+                auto_create_ecr=bool(args.auto_create_ecr),
+                requirements_file=args.requirements,
+                region=region,
+                agent_name=args.agent_name,
+            )
+            print("🔁 Reconfigured after cache purge")
+
             launch_response = runtime.launch(**launch_kwargs)
             try:
                 print("Launch response (after retry):", json.dumps(launch_response.dict(), default=str, indent=2))
