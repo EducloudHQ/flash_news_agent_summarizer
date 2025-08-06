@@ -56,7 +56,7 @@ def main():
     print("Configure response:")
     print(json.dumps(cfg, indent=2, default=str))
 
-    # 🔧 Scrub cached runtime/agent identifiers so we don't try to update a missing one
+    # Scrub cached runtime/agent identifiers so we don't try to update a missing one
     try:
         cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
         if os.path.exists(cfg_path):
@@ -86,14 +86,12 @@ def main():
     if args.local_build:
         launch_kwargs["local_build"] = True
     if args.auto_update:
-        # New: let the toolkit update if the agent already exists
         launch_kwargs["auto_update_on_conflict"] = True
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
     try:
         runtime.launch(**launch_kwargs)
     except exc.ClientError as e:
-        # Fallback: if toolkit version doesn’t accept the kwarg or we still got a conflict, retry with update
         msg = str(e)
         if "ConflictException" in msg or "already exists" in msg:
             print("ℹ︎ Conflict detected; retrying with auto-update-on-conflict...")
@@ -104,30 +102,37 @@ def main():
     # Wait for terminal state
     terminal = {"READY", "CREATE_FAILED", "DELETE_FAILED", "UPDATE_FAILED"}
     runtime_arn = None
+    final_status = None
+
     while True:
         status_resp = runtime.status()
         endpoint = None
         if hasattr(status_resp, "endpoint"):
             endpoint = status_resp.endpoint
-        elif isinstance(status_resp, dict):  # fixed type check
+        elif isinstance(status_resp, dict):
             endpoint = status_resp.get("endpoint")
 
-        status = endpoint.get("status") if isinstance(endpoint, dict) else None
+        final_status = endpoint.get("status") if isinstance(endpoint, dict) else None
         runtime_arn = (
             endpoint.get("arn") if isinstance(endpoint, dict) else runtime_arn
         ) or (
             endpoint.get("endpointArn") if isinstance(endpoint, dict) else runtime_arn
         )
 
-        print(f"Agent status: {status}")
-        if status in terminal:
+        print(f"Agent status: {final_status}")
+        if final_status in terminal:
             break
         time.sleep(10)
 
-    # Persist ARN if requested (fallback to YAML if status didn't include it)
-    if args.ssm_param and not runtime_arn:
+    # ✅ Only proceed if READY
+    if final_status != "READY":
+        print(f"❌ Agent did not reach READY (final status: {final_status}). "
+              f"Not writing SSM and failing the step.", file=sys.stderr)
+        sys.exit(2)
+
+    # If READY but ARN missing, fallback to YAML to read it
+    if not runtime_arn:
         try:
-            cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
             if os.path.exists(cfg_path):
                 with open(cfg_path, "r", encoding="utf-8") as f:
                     for line in f:
@@ -139,13 +144,15 @@ def main():
         except Exception as e:
             print(f"⚠️ Could not read ARN from .bedrock_agentcore.yaml: {e}", file=sys.stderr)
 
+    # Persist ARN to SSM only when READY and we have an ARN
     if args.ssm_param and runtime_arn:
         boto3.client("ssm").put_parameter(
             Name=args.ssm_param, Value=runtime_arn, Type="String", Overwrite=True
         )
         print(f"✔︎ Stored runtime ARN in SSM: {runtime_arn}")
-    elif not runtime_arn:
-        print("⚠️ Could not determine runtime ARN; skip SSM write.", file=sys.stderr)
+    else:
+        print("⚠️ Agent is READY but ARN could not be determined; skipping SSM write.", file=sys.stderr)
+        sys.exit(3)
 
 
 if __name__ == "__main__":

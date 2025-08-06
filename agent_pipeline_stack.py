@@ -191,11 +191,9 @@ class AgentPipelineStack(Stack):
                 # PULL + PUSH repo-scoped (toolkit/dockerd push)
                 iam.PolicyStatement(
                     actions=[
-                        # pull-ish
                         "ecr:BatchCheckLayerAvailability",
                         "ecr:GetDownloadUrlForLayer",
                         "ecr:BatchGetImage",
-                        # push
                         "ecr:InitiateLayerUpload",
                         "ecr:UploadLayerPart",
                         "ecr:CompleteLayerUpload",
@@ -203,7 +201,7 @@ class AgentPipelineStack(Stack):
                     ],
                     resources=[repo.repository_arn],
                 ),
-                # Allow creating/managing the toolkit's source bucket
+                # Allow creating/managing the toolkits source bucket
                 iam.PolicyStatement(
                     actions=[
                         "s3:CreateBucket",
@@ -241,7 +239,7 @@ class AgentPipelineStack(Stack):
                     actions=["s3:ListAllMyBuckets"],
                     resources=["*"],
                 ),
-                # Allow reading/creating the toolkit's SDK CodeBuild role
+                # Allow reading/creating the toolkits SDK CodeBuild role
                 iam.PolicyStatement(
                     actions=[
                         "iam:GetRole",
@@ -249,8 +247,7 @@ class AgentPipelineStack(Stack):
                         "iam:AttachRolePolicy",
                         "iam:PutRolePolicy",
                         "iam:TagRole",
-                        # You already have iam:PassRole (*). If you want to scope it tightly, add it here:
-                        # "iam:PassRole",
+
                     ],
                     resources=[f"arn:aws:iam::{self.account}:role/AmazonBedrockAgentCoreSDKCodeBuild-*"],
                 ),
@@ -262,13 +259,11 @@ class AgentPipelineStack(Stack):
                         "bedrock-agentcore:DeleteAgentRuntime",
                         "bedrock-agentcore:GetAgentRuntime",
                         "bedrock-agentcore:ListAgentRuntimes",
-                        # Runtime **endpoint**
                         "bedrock-agentcore:CreateAgentRuntimeEndpoint",
                         "bedrock-agentcore:UpdateAgentRuntimeEndpoint",
                         "bedrock-agentcore:DeleteAgentRuntimeEndpoint",
                         "bedrock-agentcore:GetAgentRuntimeEndpoint",
                         "bedrock-agentcore:ListAgentRuntimeEndpoints",
-                        # Tags
                         "bedrock-agentcore:TagResource",
                         "bedrock-agentcore:UntagResource",
                     ],
@@ -304,9 +299,6 @@ class AgentPipelineStack(Stack):
             ],
         )
 
-
-
-        # ❻ Then deploy your application stage
         pipeline.add_stage(
             PipelineAppStage(
                 self, "PipelineStage",

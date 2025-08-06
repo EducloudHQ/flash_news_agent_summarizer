@@ -4,8 +4,7 @@ from pathlib import Path
 
 # ---------- 1. Configure ---------- #
 RUNTIME_ARN = (
-    "arn:aws:bedrock-agentcore:us-east-1:"
-    "132260253285:runtime/flash_news_strands_agent-77mL4dBtst"
+    "arn:aws:bedrock-agentcore:us-east-1:132260253285:runtime/flash_news_strands_agent-FK6eTM3ZnR"
 )
 JSON_PATH = Path("sample_news.json")  # the big JSON you pasted earlier
 REGION = "us-east-1"
