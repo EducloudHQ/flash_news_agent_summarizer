@@ -72,7 +72,7 @@ def main():
     except Exception as e:
         print(f"⚠️ Failed to scrub cache: {e}", file=sys.stderr)
 
-    # Build and upsert
+    # Build and upsert (single upsert with auto-update enabled)
     launch_kwargs = {}
     if args.local:
         launch_kwargs["local"] = True
@@ -82,21 +82,15 @@ def main():
         launch_kwargs["auto_update_on_conflict"] = True
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
-    try:
-        launch_response = runtime.launch(**launch_kwargs)
-        print("Launch response:", json.dumps(launch_response, default=str, indent=2))
-    except exc.ClientError as e:
-        msg = str(e)
-        if "ConflictException" in msg or "already exists" in msg:
-            print("ℹ︎ Retrying update on conflict...")
-            launch_response = runtime.launch(auto_update_on_conflict=True,
-                                            **{k: v for k, v in launch_kwargs.items()
-                                               if k != "auto_update_on_conflict"})
-            print("Launch response after retry:", json.dumps(launch_response, default=str, indent=2))
-        else:
-            raise
+    # Single call: toolkit handles create-or-update
+    launch_response = runtime.launch(**launch_kwargs)
+    print("Launch response:", json.dumps(launch_response, default=str, indent=2))
 
     # Extract agent ARN directly from launch response
+    agent_arn = launch_response.get('agent_arn')
+    if not agent_arn:
+        print("❌ Launch response did not include agent_arn", file=sys.stderr)
+        sys.exit(4)
     agent_arn = launch_response.get('agent_arn')
     if not agent_arn:
         print("❌ Launch response did not include agent_arn", file=sys.stderr)
