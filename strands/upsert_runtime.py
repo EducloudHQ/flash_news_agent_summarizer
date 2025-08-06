@@ -56,21 +56,38 @@ def main():
     print("Configure response:")
     print(json.dumps(cfg, indent=2, default=str))
 
-    # Clean cached runtime IDs
-    try:
-        cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
-        if os.path.exists(cfg_path):
+    # Clean cached runtime IDs / force the name to what we pass
+    def _scrub_yaml_ids(cfg_path: str, desired_name: str) -> None:
+        try:
+            if not os.path.exists(cfg_path):
+                return
             with open(cfg_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            filtered = [ln for ln in lines if not ln.strip().startswith(
-                ("endpointArn:", "runtimeArn:", "runtimeId:", "agentId:")
-            )]
-            if filtered != lines:
-                with open(cfg_path, "w", encoding="utf-8") as f:
-                    f.writelines(filtered)
-                print("🔧 Cleared cached identifiers in .bedrock_agentcore.yaml")
-    except Exception as e:
-        print(f"⚠️ Failed to scrub cache: {e}", file=sys.stderr)
+            cleaned = []
+            for ln in lines:
+                s = ln.strip()
+                # Drop any cached identifiers that can force an update on a missing agent-id
+                if s.startswith((
+                    "endpointArn:", "endpoint_arn:",
+                    "runtimeArn:",  "runtime_arn:",
+                    "runtimeId:",
+                    "agentId:",   "agent_id:",
+                )):
+                    continue
+                # Normalize the name in the file to the desired agent name (without suffixes)
+                if s.startswith(("name:", "agentName:")):
+                    cleaned.append(f"name: {desired_name}")
+
+                    continue
+                cleaned.append(ln)
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                f.writelines(cleaned)
+            print("🔧 Scrubbed cached identifiers and normalized name in .bedrock_agentcore.yaml")
+        except Exception as e:
+            print(f"⚠️ Failed to scrub/normalize .bedrock_agentcore.yaml: {e}", file=sys.stderr)
+
+    cfg_path = os.path.join(os.getcwd(), ".bedrock_agentcore.yaml")
+    _scrub_yaml_ids(cfg_path, args.agent_name)
 
     # Build and upsert (single upsert with auto-update enabled)
     launch_kwargs = {}
@@ -83,8 +100,19 @@ def main():
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
     # Single call: toolkit handles create-or-update
-    launch_response = runtime.launch(**launch_kwargs)
-    print("Launch response:", json.dumps(launch_response, default=str, indent=2))
+    try:
+        launch_response = runtime.launch(**launch_kwargs)
+        print("Launch response:", json.dumps(launch_response, default=str, indent=2))
+    except exc.ClientError as e:
+        # If the toolkit tries to update a stale agent-id (ResourceNotFound), scrub YAML and retry once
+        msg = str(e)
+        if "ResourceNotFoundException" in msg and "UpdateAgentRuntime" in msg:
+            print("ℹ︎ Detected stale agent-id during update; scrubbing YAML and retrying create/update once...")
+            _scrub_yaml_ids(cfg_path, args.agent_name)
+            launch_response = runtime.launch(**launch_kwargs)
+            print("Launch response (after retry):", json.dumps(launch_response, default=str, indent=2))
+        else:
+            raise
 
     # Extract agent ARN directly from launch response
     agent_arn = launch_response.get('agent_arn')
