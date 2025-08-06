@@ -8,6 +8,7 @@ import time
 import boto3
 from boto3.session import Session
 from bedrock_agentcore_starter_toolkit import Runtime
+import yaml
 import botocore.exceptions as exc
 
 
@@ -58,30 +59,36 @@ def main():
 
     # Clean cached runtime IDs / force the name to what we pass
     def _scrub_yaml_ids(cfg_path: str, desired_name: str) -> None:
+        """Safely load and rewrite the toolkit YAML to normalize name and drop cached IDs/ARNs."""
         try:
             if not os.path.exists(cfg_path):
                 return
             with open(cfg_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            cleaned = []
-            for ln in lines:
-                s = ln.strip()
-                # Drop any cached identifiers that can force an update on a missing agent-id
-                if s.startswith((
-                    "endpointArn:", "endpoint_arn:",
-                    "runtimeArn:",  "runtime_arn:",
-                    "runtimeId:",
-                    "agentId:",   "agent_id:",
-                )):
-                    continue
-                # Normalize the name in the file to the desired agent name (without suffixes)
-                if s.startswith(("name:", "agentName:")):
-                    cleaned.append(f"name: {desired_name}")
+                data = yaml.safe_load(f) or {}
 
-                    continue
-                cleaned.append(ln)
+            # Normalize agent name across common keys
+            for k in ("name", "agentName", "agent_name"):
+                data[k] = desired_name
+
+            # Drop cached identifiers at top-level
+            for k in (
+                "endpointArn", "endpoint_arn",
+                "runtimeArn",  "runtime_arn",
+                "runtimeId",
+                "agentId",     "agent_id",
+            ):
+                data.pop(k, None)
+
+            # If an 'endpoint' block exists, strip volatile fields
+            ep = data.get("endpoint")
+            if isinstance(ep, dict):
+                for k in ("arn", "endpointArn", "endpoint_arn", "status"):
+                    ep.pop(k, None)
+                if not ep:
+                    data.pop("endpoint", None)
+
             with open(cfg_path, "w", encoding="utf-8") as f:
-                f.writelines(cleaned)
+                yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
             print("🔧 Scrubbed cached identifiers and normalized name in .bedrock_agentcore.yaml")
         except Exception as e:
             print(f"⚠️ Failed to scrub/normalize .bedrock_agentcore.yaml: {e}", file=sys.stderr)
