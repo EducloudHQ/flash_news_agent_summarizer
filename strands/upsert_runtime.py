@@ -9,7 +9,7 @@ import boto3
 from boto3.session import Session
 from bedrock_agentcore_starter_toolkit import Runtime
 import botocore.exceptions as exc
-from torch.utils._cxx_pytree import kwargs
+
 
 
 def main():
@@ -101,7 +101,7 @@ def main():
             launch_response = runtime.launch(auto_update_on_conflict=True, **{k: v for k, v in launch_kwargs.items() if k != "auto_update_on_conflict"})
             print("Launch response after retry:", json.dumps(launch_response, default=str, indent=2))
         else:
-            raise kwargs
+            raise
     try:
         runtime.launch(**launch_kwargs)
     except exc.ClientError as e:
