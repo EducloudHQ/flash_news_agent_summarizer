@@ -9,6 +9,7 @@ import boto3
 from boto3.session import Session
 from bedrock_agentcore_starter_toolkit import Runtime
 import botocore.exceptions as exc
+from torch.utils._cxx_pytree import kwargs
 
 
 def main():
@@ -43,6 +44,11 @@ def main():
     region = args.region or (sess.region_name or "us-east-1")
 
     runtime = Runtime()
+    # Debug: inspect the Runtime object internals
+    try:
+        print("Runtime internal state:", json.dumps(runtime.__dict__, default=str, indent=2))
+    except Exception:
+        print("Runtime __dict__:", vars(runtime))
 
     # Configure (toolkit handles Dockerfile/ECR/build config)
     cfg = runtime.configure(
@@ -84,6 +90,18 @@ def main():
         launch_kwargs["auto_update_on_conflict"] = True
 
     print(f"→ Launching runtime (kwargs={launch_kwargs or 'default'})")
+    # Capture and print the launch response
+    try:
+        launch_response = runtime.launch(**launch_kwargs)
+        print("Launch response:", json.dumps(launch_response, default=str, indent=2))
+    except exc.ClientError as e:
+        msg = str(e)
+        if "ConflictException" in msg or "already exists" in msg:
+            print("ℹ︎ Retrying update on conflict...")
+            launch_response = runtime.launch(auto_update_on_conflict=True, **{k: v for k, v in launch_kwargs.items() if k != "auto_update_on_conflict"})
+            print("Launch response after retry:", json.dumps(launch_response, default=str, indent=2))
+        else:
+            raise kwargs
     try:
         runtime.launch(**launch_kwargs)
     except exc.ClientError as e:
@@ -99,8 +117,6 @@ def main():
     runtime_arn = None
     final_status = None
     while True:
-
-        print(f"runtime details: {runtime}")
         resp = runtime.status()
         ep = getattr(resp, 'endpoint', None) or (resp.get('endpoint') if isinstance(resp, dict) else None)
         final_status = ep.get('status') if isinstance(ep, dict) else None
